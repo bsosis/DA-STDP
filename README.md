@@ -9,3 +9,5 @@ Dependencies:
 - `matplotlib`
 - `tqdm`
 - `einops`
+
+To run the experiments, run `run_experiments.py`.
