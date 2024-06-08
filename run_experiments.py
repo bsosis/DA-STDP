@@ -198,8 +198,8 @@ simulation_kwargs_action_selection = {
 
 data_collection.NUM_PROCS = 6
 
-num_samples = 10
-# num_samples = 1000
+# num_samples = 10
+num_samples = 1000
 
 
 if __name__ == '__main__':
