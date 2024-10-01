@@ -2,6 +2,7 @@ import os
 import copy
 
 import numpy as np
+import scipy.special as scs
 import einops
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
@@ -16,20 +17,41 @@ plt.rcParams.update({
 from plottools import Plotter
 import phase_planes
 
-subplot_labels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+subplot_labels = 'abcdefghijklmnopqrstuvwxyz'
 
 param_label_map = {
+    'r': r'$r$',
     'tau_eli': r'$\tau_{eli}$',
     'tau_dop': r'$\tau_{dop}$',
     'tau': r'$\tau$',
     'alpha': r'$\alpha$',
     'gamma': r'$\gamma$',
     'T_win': r'$T_{win}$ (seconds)',
+    'T_del': r'$T_{del}$',
     'w_init': r'$w_{init}$',
+    'Rstar': r'$R^*$',
+    'Rstar1': r'$R^*_1$',
+    'Rstar2': r'$R^*_2$',
+    'eps': r'$\epsilon$',
+}
+param_unit_map = {
+    'r': '',
+    'tau_eli': ' s',
+    'tau_dop': ' s',
+    'tau': ' s',
+    'alpha': '',
+    'gamma': '',
+    'T_win': ' s',
+    'T_del': ' s',
+    'w_init': '',
+    'Rstar': '',
+    'Rstar1': '',
+    'Rstar2': '',
+    'eps': ' s',
 }
 
 def register_fig(plotter, fig, name):
-    plotter.register(fig, name, formats=['pdf', 'png'])
+    plotter.register(fig, name, formats=['pdf', 'png', 'eps'])
 
 def square_subplots(fig):
     # https://stackoverflow.com/questions/51474842/python-interplay-between-axissquare-and-set-xlim/51483579#51483579
@@ -51,8 +73,7 @@ def square_subplots(fig):
     fig.subplots_adjust(bottom=h, top=1-h, left=w, right=1-w)
 
 def label_subplot(fig, ax, label_index, scale=1):
-    # https://matplotlib.org/stable/gallery/text_labels_and_annotations/label_subplots.html
-    trans = mtransforms.ScaledTranslation(scale*12.5/72, -scale*7.5/72, #scale*10/72, -scale*5/72, 
+    trans = mtransforms.ScaledTranslation(scale*12.5/72, -scale*7.5/72,
                                           fig.dpi_scale_trans)
     ax.text(0.0, scale, subplot_labels[label_index], 
         transform=ax.transAxes + trans,
@@ -66,9 +87,11 @@ def label_subplot(fig, ax, label_index, scale=1):
 density_cmap = plt.get_cmap('viridis').reversed()
 
 def plot_density(ax, weights, bins):
-    # Adds density plot to an Axes object
-    # weights should have shape (num_samples, N, num_steps)
-    # N should be 2
+    """
+    Adds density plot to an Axes object
+    weights should have shape (num_samples, N, num_steps)
+    N should be 2
+    """
     num_steps = weights.shape[-1]
     num_samples = weights.shape[0]
     bin_arr = np.linspace(0,1,bins+1)
@@ -76,7 +99,6 @@ def plot_density(ax, weights, bins):
     hists_over_time = [np.histogram2d(weights[:,0,k], weights[:,1,k], 
                             bins=bin_arr)[0].T
                         for k in range(num_steps)]
-
     # Simple averaging
     # This has shape (num_steps, x, y, 4) giving RGBA (with values in [0,1])
     imgs = np.array([density_cmap(t*np.ones_like(h)/num_steps, alpha=h/num_samples)
@@ -268,12 +290,12 @@ def plot_reward_prediction_phase_planes_task_switching_density(weights,
         for k in range(2):
             axs[k][0].set_ylabel(r'$w_2$')
         axs[0][0].text(x=-0.5, y=0, 
-                        s='Slow\nswitching',
+                        s='Infrequent\nswitching',
                         rotation=90,
                         horizontalalignment='left', verticalalignment='bottom',
                         transform=axs[0][0].transAxes) # Set to axis coords
         axs[1][0].text(x=-0.5, y=0, 
-                        s='Fast\nswitching',
+                        s='Frequent\nswitching',
                         rotation=90,
                         horizontalalignment='left', verticalalignment='bottom',
                         transform=axs[1][0].transAxes) # Set to axis coords
@@ -281,22 +303,49 @@ def plot_reward_prediction_phase_planes_task_switching_density(weights,
             axs[0][i].set_title(models[i%len(models)].title())
             axs[-1][i].set_xlabel(r'$w_1$')
 
-        axs[0][0].text(x=0.5, y=1.2, 
+        # Setting the aspect ratio doesn't work for subplots sharing axes
+        square_subplots(fig)
+        plt.tight_layout(rect=(0,0,1,.95))
+        add_density_colorbar(fig, axs, weights.shape[-1], add_legend=True,
+                             legend_points=['stable', 'unstable', 'saddle', 'winit'])
+
+        # Add labels for the subplot groups with and without intersections
+        # Find the coordinates halfway between columns 0 and 1
+        ax01_pos = axs[0][1].get_position()
+        # Create a transform from figure coordinates to ax00 data coordinates
+        fig_to_ax00 = mtransforms.CompositeGenericTransform(
+            fig.transFigure,  # from figure to display coordinates
+            axs[0][0].transData.inverted()  # from display to ax00 data coordinates
+        )
+        # Transform ax2's corners to ax1's coordinate system
+        ax01_in_ax00 = fig_to_ax00.transform([
+            (ax01_pos.x0, ax01_pos.y0),  # bottom-left corner
+            (ax01_pos.x1, ax01_pos.y1)   # top-right corner
+        ])
+        x_offset = (ax01_in_ax00[0,0] - 1)/2
+        fig.text(x=1+x_offset, y=1.2, 
                         fontsize=axs[0][0].title.get_fontsize(),
                         s='With intersection',
                         horizontalalignment='center', verticalalignment='bottom',
                         transform=axs[0][0].transAxes) # Set to axis coords
-        axs[0][2].text(x=0.5, y=1.2, 
+        # Find the coordinates halfway between columns 2 and 3
+        ax03_pos = axs[0][3].get_position()
+        # Create a transform from figure coordinates to ax02 data coordinates
+        fig_to_ax02 = mtransforms.CompositeGenericTransform(
+            fig.transFigure,  # from figure to display coordinates
+            axs[0][2].transData.inverted()  # from display to ax02 data coordinates
+        )
+        # Transform ax2's corners to ax1's coordinate system
+        ax03_in_ax02 = fig_to_ax02.transform([
+            (ax03_pos.x0, ax03_pos.y0),  # bottom-left corner
+            (ax03_pos.x1, ax03_pos.y1)   # top-right corner
+        ])
+        x_offset = (ax03_in_ax02[0,0] - 1)/2
+        fig.text(x=1+x_offset, y=1.2, 
                         fontsize=axs[0][2].title.get_fontsize(),
                         s='Without intersection',
                         horizontalalignment='center', verticalalignment='bottom',
                         transform=axs[0][2].transAxes) # Set to axis coords
-
-        # Setting the aspect ratio doesn't work for subplots sharing axes
-        square_subplots(fig)
-        plt.tight_layout()
-        add_density_colorbar(fig, axs, weights.shape[-1], add_legend=True,
-                             legend_points=['stable', 'unstable', 'saddle', 'winit'])
 
         register_fig(plotter, fig, f'Reward Prediction Phase Planes Density Rstar')
 
@@ -387,16 +436,16 @@ def plot_action_selection_weight_limits_delay(weights, delay_vals, models,
 
     with Plotter(save_folder=save_folder, silent=silent) as plotter:
         fig, axs = plt.subplots(ncols=num_models, sharey='row', squeeze=True,
-                                figsize=(1+2*num_models, 3))
+                                figsize=(1+2*(1+num_models), 3), layout='constrained')
 
         for k in range(num_models):
             for l in range(2):
                 # Only look at the last step
                 axs[k].errorbar(delay_vals, weights_mean[k,0,:,l,-1], yerr=weights_std[k,0,:,l,-1],
-                                label=f'$w^{l+1}$, not sustained',
+                                label=f'$w^{l+1}$, not sustained' if k==num_models-1 else None,
                                 linestyle=linestyles[0], color=f'C{l}', capsize=5)
                 axs[k].errorbar(delay_vals, weights_mean[k,1,:,l,-1], yerr=weights_std[k,1,:,l,-1],
-                                label=f'$w^{l+1}$, sustained',
+                                label=f'$w^{l+1}$, sustained' if k==num_models-1 else None,
                                 linestyle=linestyles[1], color=f'C{l}', capsize=5)
 
             axs[k].set_title(models[k].title())
@@ -404,26 +453,72 @@ def plot_action_selection_weight_limits_delay(weights, delay_vals, models,
             axs[k].set_xlabel(r'$T_{del}$ (seconds)')
         axs[0].set_ylim(0,1.2) # Use 1.2 because some curves are right at 1
         axs[0].set_ylabel(r'$w$')
-        axs[-1].legend(loc='upper right')
-
-        plt.tight_layout()
+        fig.legend(loc='outside right upper')
 
         register_fig(plotter, fig, f'Action Selection Weight Limits Delay')
     
     # Save data at last time point
-    with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
-        f.write(f'Delay vals: {delay_vals}\n')
-        f.write(f'Not sustained:\n')
-        for i, model in enumerate(models):
-            f.write(f'\t{model} model:\n')
-            f.write(f'\t\tw^1: {weights_mean[i,0,:,0,-1]} +/- {weights_std[i,0,:,0,-1]}\n')
-            f.write(f'\t\tw^2: {weights_mean[i,0,:,1,-1]} +/- {weights_std[i,0,:,1,-1]}\n')
-        f.write(f'Sustained:\n')
-        for i, model in enumerate(models):
-            f.write(f'\t{model} model:\n')
-            f.write(f'\t\tw^1: {weights_mean[i,1,:,0,-1]} +/- {weights_std[i,1,:,0,-1]}\n')
-            f.write(f'\t\tw^2: {weights_mean[i,1,:,1,-1]} +/- {weights_std[i,1,:,1,-1]}\n')
+    if save_folder is not None:
+        with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
+            f.write(f'Delay vals: {delay_vals}\n')
+            f.write(f'Not sustained:\n')
+            for i, model in enumerate(models):
+                f.write(f'\t{model} model:\n')
+                f.write(f'\t\tw^1: {weights_mean[i,0,:,0,-1]} +/- {weights_std[i,0,:,0,-1]}\n')
+                f.write(f'\t\tw^2: {weights_mean[i,0,:,1,-1]} +/- {weights_std[i,0,:,1,-1]}\n')
+            f.write(f'Sustained:\n')
+            for i, model in enumerate(models):
+                f.write(f'\t{model} model:\n')
+                f.write(f'\t\tw^1: {weights_mean[i,1,:,0,-1]} +/- {weights_std[i,1,:,0,-1]}\n')
+                f.write(f'\t\tw^2: {weights_mean[i,1,:,1,-1]} +/- {weights_std[i,1,:,1,-1]}\n')
 
+def plot_action_selection_weight_limits(weights, param_to_vary, param_vals, models, log_x=False,
+                                        save_folder=None, silent=False):
+    """
+    Plot the weights at the end of the run while varying a parameter
+    weights should have shape
+    (num_models, num_param_vals, num_samples, channels, N, num_steps)
+    channels should be 2, N should be 1
+    # """
+
+    # Shape (num_models, num_param_vals, channels)
+    weights_mean = einops.reduce(weights, 'm param s c 1 t -> m param c t', np.mean)
+    weights_std = einops.reduce(weights, 'm param s c 1 t -> m param c t', np.std)
+
+    num_models = len(models)
+
+    with Plotter(save_folder=save_folder, silent=silent) as plotter:
+        fig, axs = plt.subplots(ncols=num_models, sharey='row', squeeze=True,
+                                figsize=(1+2*num_models, 3))
+
+        for k in range(num_models):
+            for l in range(2):
+                # Only look at the last step
+                axs[k].errorbar(param_vals, weights_mean[k,:,l,-1], yerr=weights_std[k,:,l,-1],
+                                label=f'$w^{l+1}$',
+                                color=f'C{l}', capsize=5)
+
+            axs[k].set_title(models[k].title())
+            label_subplot(fig, axs[k], k)
+            axs[k].set_xlabel(param_label_map[param_to_vary])
+            if log_x:
+                axs[k].set_xscale('log')
+        axs[0].set_ylim(0,1.2) # Use 1.2 because some curves are right at 1
+        axs[0].set_ylabel(r'$w$')
+        axs[-1].legend(loc='upper right')
+
+        plt.tight_layout()
+
+        register_fig(plotter, fig, f'Action Selection Weight Limits {param_to_vary}')
+    
+    # Save data at last time point
+    if save_folder is not None:
+        with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
+            f.write(f'{param_to_vary} vals: {param_vals}\n')
+            for i, model in enumerate(models):
+                f.write(f'{model} model:\n')
+                f.write(f'\tw^1: {weights_mean[i,:,0,-1]} +/- {weights_std[i,:,0,-1]}\n')
+                f.write(f'\tw^2: {weights_mean[i,:,1,-1]} +/- {weights_std[i,:,1,-1]}\n')
 
 def plot_action_selection_weights_over_time_contingency_switching(weights, actions, models,
                                     switch_period, save_folder=None, silent=False):
@@ -496,12 +591,13 @@ def plot_action_selection_weights_over_time_contingency_switching(weights, actio
         register_fig(plotter, fig, f'Action Selection Weights Over Time Contingency Switching')
     
     # Save data at last time point
-    with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
-        for i, model in enumerate(models):
-            f.write(f'{model} model:\n')
-            f.write(f'\tw^1: {weights_mean[i,0,-1]:.3f} +/- {weights_std[i,0,-1]:.3f}\n')
-            f.write(f'\tw^2: {weights_mean[i,1,-1]:.3f} +/- {weights_std[i,1,-1]:.3f}\n')
-            f.write(f'\tP(correct): {prob_correct[i,-1]:.3f} +/- {actions_std[i,-1]:.3f}\n')
+    if save_folder is not None:
+        with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
+            for i, model in enumerate(models):
+                f.write(f'{model} model:\n')
+                f.write(f'\tw^1: {weights_mean[i,0,-1]:.3f} +/- {weights_std[i,0,-1]:.3f}\n')
+                f.write(f'\tw^2: {weights_mean[i,1,-1]:.3f} +/- {weights_std[i,1,-1]:.3f}\n')
+                f.write(f'\tP(correct): {prob_correct[i,-1]:.3f} +/- {actions_std[i,-1]:.3f}\n')
 
 def plot_action_selection_weights_over_time_contingency_switching_one_model(weights, actions,
                                     switch_period, save_folder=None, silent=False):
@@ -571,10 +667,11 @@ def plot_action_selection_weights_over_time_contingency_switching_one_model(weig
         register_fig(plotter, fig, f'Action Selection Weights Over Time Contingency Switching')
     
     # Save data at last time point
-    with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
-        f.write(f'w^1: {weights_mean[0,-1]:.3f} +/- {weights_std[0,-1]:.3f}\n')
-        f.write(f'w^2: {weights_mean[1,-1]:.3f} +/- {weights_std[1,-1]:.3f}\n')
-        f.write(f'P(correct): {prob_correct[-1]:.3f} +/- {actions_std[-1]:.3f}\n')
+    if save_folder is not None:
+        with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
+            f.write(f'w^1: {weights_mean[0,-1]:.3f} +/- {weights_std[0,-1]:.3f}\n')
+            f.write(f'w^2: {weights_mean[1,-1]:.3f} +/- {weights_std[1,-1]:.3f}\n')
+            f.write(f'P(correct): {prob_correct[-1]:.3f} +/- {actions_std[-1]:.3f}\n')
 
 def plot_action_selection_task_switching_density(weights, actions, models, sim_kwargs,
                                          bins=100, save_folder=None, silent=False):
@@ -608,7 +705,6 @@ def plot_action_selection_task_switching_density(weights, actions, models, sim_k
     with Plotter(save_folder=save_folder, silent=silent) as plotter:
         # Three rows: w^1, w^2, and actions
         # First two rows need to share x and y axes, third row needs to share y axis among itself
-        # https://stackoverflow.com/questions/42973223/how-to-share-x-axes-of-two-subplots-after-they-have-been-created
         fig, axs = plt.subplots(3, len(models), squeeze=False,
                                 figsize=(1+2*len(models), 7))
         for i,model in enumerate(models):
@@ -657,19 +753,20 @@ def plot_action_selection_task_switching_density(weights, actions, models, sim_k
             axs[0,i].set_title(model.title())
         
         # Setting the aspect ratio doesn't work for subplots sharing axes
-        square_subplots(fig) # Note, not sure action plots should be square but whatever
+        square_subplots(fig)
         plt.tight_layout()
         add_density_colorbar(fig, axs[:2,:], weights.shape[-1])
 
         register_fig(plotter, fig, f'Action Selection Task Switching Density {"Slow" if slow_switching else "Fast"}')
     
     # Save data at last time point
-    with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
-        for i, model in enumerate(models):
-            f.write(f'{model} model:\n')
-            f.write(f'\tw^1: {weights_mean[i,0,:,-1]} +/- {weights_std[i,0,:,-1]}\n')
-            f.write(f'\tw^2: {weights_mean[i,1,:,-1]} +/- {weights_std[i,1,:,-1]}\n')
-            f.write(f'\tP(correct): {prob_correct[i,-1]:.3f} +/- {actions_std[i,-1]:.3f}\n')
+    if save_folder is not None:
+        with open(os.path.join(save_folder, 'last_step.txt'), 'w') as f:
+            for i, model in enumerate(models):
+                f.write(f'{model} model:\n')
+                f.write(f'\tw^1: {weights_mean[i,0,:,-1]} +/- {weights_std[i,0,:,-1]}\n')
+                f.write(f'\tw^2: {weights_mean[i,1,:,-1]} +/- {weights_std[i,1,:,-1]}\n')
+                f.write(f'\tP(correct): {prob_correct[i,-1]:.3f} +/- {actions_std[i,-1]:.3f}\n')
 
 
 def plot_single_model_all_settings(model, weights_random_DA_winit, winit_vals, 
@@ -686,39 +783,43 @@ def plot_single_model_all_settings(model, weights_random_DA_winit, winit_vals,
     channels should be 2, N should be 1
     """
     with Plotter(save_folder=save_folder, silent=silent) as plotter:
-        fig, axs = plt.subplots(1, 3,
-                                figsize=(7.75, 2.5))
+        fig = plt.figure(layout='constrained', figsize=(6,5.5))
+        subfigs = fig.subfigures(2,1)
+        axs_top = subfigs[0].subplot_mosaic([['rand', '.']], gridspec_kw={'width_ratios': [1.6,1]})
+        axs_bottom = subfigs[1].subplots(1,2, squeeze=True)
+        
         # Plot random DA winit
         weights_winit_mean = einops.reduce(weights_random_DA_winit, 'p s 1 N t -> p t', np.mean)
         weights_winit_std = einops.reduce(weights_random_DA_winit, 'p s 1 N t -> p t', np.std)
         for j, v in enumerate(winit_vals):
-            axs[0].plot(weights_winit_mean[j,:], label=r'$w_{init}=' + f'{v:.2f}$', color=f'C{j}')
-            axs[0].fill_between(np.arange(len(weights_winit_mean[j,:])), 
+            axs_top['rand'].plot(weights_winit_mean[j,:], label=r'$w_{init}=' + f'{v:.2f}$', color=f'C{j}')
+            axs_top['rand'].fill_between(np.arange(len(weights_winit_mean[j,:])), 
                                 weights_winit_mean[j,:]+weights_winit_std[j,:],
                                 weights_winit_mean[j,:]-weights_winit_std[j,:],
                                 color=f'C{j}', alpha=0.2)
-        axs[0].set_title('Random Dopamine')
-        label_subplot(fig, axs[0], 0)
-        axs[0].set_xlabel(r'Step')
-        axs[0].set_ylabel(r'$w$')
-        axs[0].set_ylim(0,1)
-        axs[0].legend()
+        axs_top['rand'].set_title('Random Dopamine')
+        label_subplot(fig, axs_top['rand'], 0)
+        axs_top['rand'].set_xlabel(r'Step')
+        axs_top['rand'].set_ylabel(r'$w$')
+        axs_top['rand'].set_ylim(0,1)
+        axs_top['rand'].legend(loc='upper left', bbox_to_anchor=(1.05, 1), borderaxespad=0)
 
         # Plot reward prediction
-        phase_planes.plot_phase_plane(axs[1], model,
+        phase_planes.plot_phase_plane(axs_bottom[0], model,
                                       sim_kwargs_reward_prediction['alpha'], 
                                       sim_kwargs_reward_prediction['tau'],
                                       sim_kwargs_reward_prediction['r'], 
                                       sim_kwargs_reward_prediction['Rstar'],
                                       T_win=sim_kwargs_reward_prediction['T_win'], 
                                       points=10, color='dimgray')
-        plot_density(axs[1], weights_reward_prediction[0,:,0,:,:], bins)
-        axs[1].set_title('Reward Prediction')
-        label_subplot(fig, axs[1], 1)
-        axs[1].set_xlabel(r'$w_1$')
-        axs[1].set_ylabel(r'$w_2$')
-        axs[1].set_xlim(0, 1)
-        axs[1].set_ylim(0, 1)
+        plot_density(axs_bottom[0], weights_reward_prediction[0,:,0,:,:], bins)
+        axs_bottom[0].set_title('Reward Prediction')
+        label_subplot(fig, axs_bottom[0], 1)
+        axs_bottom[0].set_xlabel(r'$w_1$')
+        axs_bottom[0].set_ylabel(r'$w_2$')
+        axs_bottom[0].set_xlim(0, 1)
+        axs_bottom[0].set_ylim(0, 1)
+        axs_bottom[0].set_aspect('equal')
 
         # Plot action selection
         # Shape (num_models, channels, num_steps)
@@ -727,24 +828,24 @@ def plot_single_model_all_settings(model, weights_random_DA_winit, winit_vals,
         num_steps = weights_action_selection.shape[-1]
         for l in range(2):
             # Plot weights
-            axs[2].plot(weights_mean[l,:],
+            axs_bottom[1].plot(weights_mean[l,:],
                             label=r'$w^{'+f'{l+1}'+r'}$', color=f'C{l}')
-            axs[2].fill_between(np.arange(num_steps),
+            axs_bottom[1].fill_between(np.arange(num_steps),
                                     weights_mean[l,:]+weights_std[l,:],
                                     weights_mean[l,:]-weights_std[l,:],
                                     color=f'C{l}', alpha=0.2)
-        axs[2].set_title('Action Selection')
-        axs[2].set_xlabel('Step')
-        axs[2].set_ylim(0, 1)
-        axs[2].set_ylabel(r'$w$')
-        axs[2].legend(loc='lower left')
-        label_subplot(fig, axs[2], 2)
+        axs_bottom[1].set_title('Action Selection')
+        axs_bottom[1].set_xlabel('Step')
+        axs_bottom[1].set_ylim(0, 1)
+        axs_bottom[1].set_ylabel(r'$w$')
+        axs_bottom[1].legend(loc='center right')
+        label_subplot(fig, axs_bottom[1], 2)
         # Plot actions as a twin axis (if provided)
         if actions is not None:
             # Shape (num_models, num_steps)
             actions_mean = einops.reduce(actions, '1 s t -> t', np.mean)
             actions_std = einops.reduce(actions, '1 s t -> t', np.std)
-            ax_actions = axs[2].twinx()
+            ax_actions = axs_bottom[1].twinx()
             # Actions are 0 or 1 for actions 1, 2, so P(A1) is 1 - actions_mean
             # Use zorder=-1 to put it in the back
             ax_actions.plot(1-actions_mean, color='C2')
@@ -756,20 +857,19 @@ def plot_single_model_all_settings(model, weights_random_DA_winit, winit_vals,
             ax_actions.set_ylabel(r'Proportion correct', color='C2')
             ax_actions.tick_params(axis='y', labelcolor='C2')
             # Put this Axes below other one (by default it goes above regardless of zorder)
-            # https://stackoverflow.com/questions/38687887/how-to-define-zorder-when-using-2-y-axis
-            axs[2].set_zorder(ax_actions.get_zorder()+1)
-            axs[2].patch.set_visible(False)
+            axs_bottom[1].set_zorder(ax_actions.get_zorder()+1)
+            axs_bottom[1].patch.set_visible(False)
         
-        # Setting the aspect ratio doesn't work for subplots sharing axes
-        square_subplots(fig) # Note, only reward prediction plot needs to be square but whatever
-        plt.tight_layout()
-        add_density_colorbar(fig, axs[1], weights_reward_prediction.shape[-1])
+        fig.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0,weights_reward_prediction.shape[-1]), 
+                                           cmap=density_cmap), 
+                     ax=axs_bottom[0], 
+                     shrink=0.9, label='Step', pad=0.025, fraction=0.1)
 
         register_fig(plotter, fig, f'Single Model All Settings {model}{" No Actions" if actions is None else ""}')
 
 
-import scipy.special as scs
 def get_predicted_instantaneous_drift(param_to_vary, param_vals, model, sim_kwargs):
+    """Get predictions of the averaged model for drift in 1D after a single dopamine signal"""
     assert sim_kwargs['N'] == 1
     predicted_dw = []
     for v in param_vals:
@@ -800,32 +900,40 @@ def get_predicted_instantaneous_drift(param_to_vary, param_vals, model, sim_kwar
     return np.array(predicted_dw)
 
 
-def plot_reward_prediction_instantaneous_drift(weights, param_to_vary, param_vals, delay_vals, models, 
-                                               sim_kwargs=None, log_x=False, scale_y=False, 
+def plot_reward_prediction_instantaneous_drift(weights, param1, param1_vals,
+                                                param2, param2_vals, models, 
+                                               sim_kwargs=None, val_for_predictions=None, 
+                                               log_x=False, scale_y=False, 
                                                save_folder=None, silent=False):
     """
     Plot instantaneous drift rate for reward prediction task
-    weights should have shape (models, delay_vals, param_vals, samples, channels, N, num_steps)
-    channels = 1, N = 1, num_steps = 2,
-    """
+    weights should have shape (models, param1_vals, param2_vals, samples, channels, N, num_steps)
+    channels = 1, N = 1, num_steps = 2
+    param1 is plot as different lines, param2 is plot along the x-axis
+    If val_for_predictions is given, use it as the value of param1 to plot predicted
+    instantaneous drift
+    # """
 
-    dw = weights[...,1] - weights[...,0] # Shape (models, delay_vals, param_vals, samples, 1, 1)
+    dw = weights[...,1] - weights[...,0] # Shape (models, param1_vals, param2_vals, samples, 1, 1)
 
     if scale_y:
-        dw = dw/np.array(param_vals).reshape(1,1,-1,1,1,1)
+        dw = dw/np.array(param2_vals).reshape(1,1,-1,1,1,1)
 
-    dw_mean = einops.reduce(dw, 'm d p s 1 1 -> m d p', np.mean) # Shape (models, delay_vals, param_vals)
-    dw_std = einops.reduce(dw, 'm d p s 1 1 -> m d p', np.std) # Shape (models, delay_vals, param_vals)
+    dw_mean = einops.reduce(dw, 'm p1 p2 s 1 1 -> m p1 p2', np.mean) # Shape (models, param1_vals, param2_vals)
+    dw_std = einops.reduce(dw, 'm p1 p2 s 1 1 -> m p1 p2', np.std) # Shape (models, param1_vals, param2_vals)
 
     num_models = len(models)
 
-    if sim_kwargs is not None:
-        predicted_dw = [get_predicted_instantaneous_drift(param_to_vary, param_vals, models[k], sim_kwargs)
+    if sim_kwargs is not None and val_for_predictions is not None:
+        predicted_dw = [get_predicted_instantaneous_drift(param2, param2_vals, models[k], 
+                                                          {**sim_kwargs, param1: val_for_predictions})
                         for k in range(num_models)]
         predicted_dw = np.array(predicted_dw) # Shape (models, param_vals)
+    else:
+        predicted_dw = None
 
     with Plotter(save_folder=save_folder, silent=silent) as plotter:
-        if param_to_vary == 'w_init':
+        if param2 == 'w_init':
             fig, axs = plt.subplots(ncols=num_models, squeeze=True,
                                     figsize=(1+2.5*num_models, 3))
         else:
@@ -833,42 +941,44 @@ def plot_reward_prediction_instantaneous_drift(weights, param_to_vary, param_val
                                     figsize=(1+2*num_models, 3))
 
         for k in range(num_models):
-            for l in range(len(delay_vals)):
-                axs[k].errorbar(param_vals, dw_mean[k,l], yerr=dw_std[k,l],
-                               label=r'$T_{del}='+f'{delay_vals[l]}$ s', capsize=5)
+            for l in range(len(param1_vals)):
+                axs[k].errorbar(param2_vals, dw_mean[k,l], yerr=dw_std[k,l],
+                               label=(param_label_map[param1][:-1] + '=' + f'{param1_vals[l]}' 
+                                      + '$' + param_unit_map[param1]), 
+                               capsize=5)
             axs[k].axhline(0, color='black') # Plot zero line
-            if sim_kwargs is not None:
-                axs[k].plot(param_vals, predicted_dw[k], color='grey', linestyle='--',
+            if predicted_dw is not None:
+                axs[k].plot(param2_vals, predicted_dw[k], color='grey', linestyle='--',
                             label='Predicted', zorder=4)
 
             axs[k].set_title(models[k].title())
             label_subplot(fig, axs[k], k)
-            if param_to_vary in param_label_map:
-                axs[k].set_xlabel(param_label_map[param_to_vary])
+            if param2 in param_label_map:
+                axs[k].set_xlabel(param_label_map[param2])
             else:
-                axs[k].set_xlabel(param_to_vary)
+                axs[k].set_xlabel(param2)
             if log_x:
                 axs[k].set_xscale('log')
             else:
                 axs[k].set_xlim(0, axs[k].get_xlim()[1])
         if scale_y:
-            if param_to_vary in param_label_map:
-                axs[0].set_ylabel(r'$\Delta w / ' + param_label_map[param_to_vary].split('$')[1] + '$')
+            if param2 in param_label_map:
+                axs[0].set_ylabel(r'$\Delta w / ' + param_label_map[param2].split('$')[1] + '$')
             else:
-                axs[0].set_ylabel(r'$\Delta w / ' + param_to_vary + '$')
+                axs[0].set_ylabel(r'$\Delta w / ' + param2 + '$')
         else:
             axs[0].set_ylabel(r'$\Delta w$')
-        if param_to_vary == 'w_init':
+        if param2 == 'w_init':
             axs[-1].legend(loc='lower left')
         else:
             axs[-1].legend(loc='upper right')
-        if param_to_vary == 'T_win' and param_vals[0] < 0.2:
+        if param2 == 'T_win' and param2[0] < 0.2:
             # Set ylims to ignore the first entry
             axs[0].set_ylim(
                 1.2*min(np.min(dw_mean[:,:,1:] - dw_std[:,:,1:]), np.min(predicted_dw[:,1:])),
                 1.2*max(np.max(dw_mean[:,:,1:] + dw_std[:,:,1:]), np.max(predicted_dw[:,1:]))
             )
-
+        
         plt.tight_layout()
 
-        register_fig(plotter, fig, f'Reward Prediction Instantaneous Drift')
+        register_fig(plotter, fig, f'Reward Prediction Instantaneous Drift {param1} {param2}')

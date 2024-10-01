@@ -222,6 +222,7 @@ def simulate(max_T, N, r, Rstar, task, model, alpha, tau, tau_dop, tau_eli, lamb
             y_arr = y_arrs[-1]
 
         # Do w first so we can compute it in-place with the old values of the other variables
+        # We use the explicit solutions to the weight update ODEs
         if model == 'additive':
             y_arr[:,ind_w] += (lambda_ * (tau_dop*tau_eli/(tau_dop + tau_eli)) 
                                         * (1 - np.exp(-dt*(1/tau_dop + 1/tau_eli)))

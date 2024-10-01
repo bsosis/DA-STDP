@@ -101,8 +101,10 @@ def get_weights_over_time(num_samples, sim_kwargs, params_to_vary, param_vals_li
         return weights
 
 def get_weights_over_time_multiple(num_samples, sim_kwargs, param_set_list):
-    # Wrap multiple sequential calls to _get_weights_over_time
-    # param_set_list should be list of (params_to_vary, param_vals_list) tuples
+    """
+    Wrap multiple sequential calls to _get_weights_over_time
+    param_set_list should be list of (params_to_vary, param_vals_list) tuples
+    """
     weights_list = [
         get_weights_over_time(num_samples, sim_kwargs, params_to_vary, param_vals_list)
         for params_to_vary, param_vals_list in param_set_list]

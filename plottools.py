@@ -1,5 +1,6 @@
 
 import os
+import subprocess
 
 import matplotlib.pyplot as plt
 
@@ -11,7 +12,6 @@ class Plotter:
         self.save_folder = save_folder
         self.silent = silent
 
-        # https://stackoverflow.com/questions/52839758/matplotlib-and-runtimeerror-main-thread-is-not-in-main-loop
         if silent:
             plt.switch_backend('Agg')
         else:
@@ -26,7 +26,14 @@ class Plotter:
                 fig.savefig(os.path.join(self.save_folder, fname), **kwargs)
             else:
                 for fmt in formats:
-                    fig.savefig(os.path.join(self.save_folder, fname + '.' + fmt), **kwargs)
+                    if fmt == 'eps':
+                        # For eps files, first generate a pdf then convert to eps
+                        fig.savefig(os.path.join(self.save_folder, fname + '.pdf'), **kwargs)
+                        subprocess.call(['pdf2ps', 
+                                         os.path.join(self.save_folder, fname + '.pdf'),
+                                         os.path.join(self.save_folder, fname + '.eps')])
+                    else:
+                        fig.savefig(os.path.join(self.save_folder, fname + '.' + fmt), **kwargs)
 
         if self.silent:
             plt.close(fig)

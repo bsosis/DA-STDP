@@ -18,6 +18,7 @@ model_funs = { # (f+, f-)
 }
 
 def simple_eig(r1, r2, Rstar, alpha, tau, model):
+    """Compute eigenvalue of Jacobian for additive, multiplicative, and symmetric models"""
     fp, fm = model_funs[model]
 
     eig = lambda x, y: -(tau*Rstar*(fp(x, alpha)-fm(x, alpha))*r1**2 + (1/2)*fp(x, alpha)*x*r1**2
@@ -25,6 +26,7 @@ def simple_eig(r1, r2, Rstar, alpha, tau, model):
     return eig
 
 def simple_vector_field(w1, w2, r1, r2, Rstar, alpha, tau, model):
+    """Compute vector field for additive, multiplicative, and symmetric models"""
     dot_prod = w1*r1 + w2*r2
     fp, fm = model_funs[model]
 
@@ -33,8 +35,8 @@ def simple_vector_field(w1, w2, r1, r2, Rstar, alpha, tau, model):
     return dw1, dw2
 
 def corticostriatal_vector_field(w1, w2, r1, r2, Rstar, alpha, tau, T_win):
-    # Supports w1, w2 of any shape
-    dot_prod = w1*r1 + w2*r2
+    """Compute vector field for corticostriatal model"""
+    dot_prod = w1*r1 + w2*r2 # Supports w1, w2 of any shape
     rpost = 0.5*dot_prod
     Dplus = (Rstar*scs.gammaincc(np.floor(Rstar*T_win)+1, rpost*T_win)
             - rpost*scs.gammaincc(np.floor(Rstar*T_win), rpost*T_win))
@@ -46,6 +48,9 @@ def corticostriatal_vector_field(w1, w2, r1, r2, Rstar, alpha, tau, T_win):
     return dw1, dw2
 
 def vector_field_fast_switching(w1, w2, r, Rstar_vals, alpha, tau, model, T_win=None):
+    """
+    Compute vector field oin frequent task switching settings by averaging the vector fields being switched between
+    """
     if model in model_funs:
         dw1_A, dw2_A = simple_vector_field(w1, w2, r[0][0], r[0][1], Rstar_vals[0], alpha, tau, model)
         dw1_B, dw2_B = simple_vector_field(w1, w2, r[1][0], r[1][1], Rstar_vals[1], alpha, tau, model)
@@ -157,8 +162,6 @@ def plot_phase_plane(ax, model, alpha, tau, r, Rstar, T_win=None, points=10, col
     w1_line = w1_line[inds]
     w2_line = w2_line[inds]
     if eig is not None:
-        # See here for multicolored lines:
-        # https://matplotlib.org/stable/gallery/lines_bars_and_markers/multicolored_line.html
         points = np.array([w1_line, w2_line]).T.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
         cmap = ListedColormap(['black', 'red'])
