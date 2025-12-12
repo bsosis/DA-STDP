@@ -181,7 +181,7 @@ def simulate(max_T: float, N: int, r: Union[np.ndarray, List[float], float], Rst
     t_arr = [0]
     # Coordinates: (Apre, Apost, E_pos, E_neg, DA, w)*channels
     # Apre, E_pos, E_neg, w have length N
-    # If task is 'value estimation', there is an extra coordinate for Rbar_diff
+    # If task is 'value estimation', there is an extra coordinate for V_diff
     if task == 'value estimation':
         y_arrs = [np.zeros((channels, N + 1 + N + N + 1 + N + 1))]
     else:
@@ -194,7 +194,7 @@ def simulate(max_T: float, N: int, r: Union[np.ndarray, List[float], float], Rst
     ind_DA = np.array([3*N+1]) # Note, size-1 array
     ind_w = np.arange(3*N+2, 4*N+2)
     if task == 'value estimation':
-        ind_Rbar_diff = np.array([4*N+2]) # Note, size-1 array
+        ind_V_diff = np.array([4*N+2]) # Note, size-1 array
 
     # Initialize weights
     y_arrs[0][:,ind_w] = w_init # Will broadcast correctly if it's an array
@@ -294,12 +294,12 @@ def simulate(max_T: float, N: int, r: Union[np.ndarray, List[float], float], Rst
         y_arr[:,ind_Apost] *= exp_tau
         y_arr[:,ind_E_pos] *= exp_eli
         y_arr[:,ind_E_neg] *= exp_eli
-        # Update Rbar_diff (before DA since it depends on DA)
+        # Update V_diff (before DA since it depends on DA)
         if task == 'value estimation':
-            # If we haven't selected an action yet, Rbar_diff doesn't change
+            # If we haven't selected an action yet, V_diff doesn't change
             if selected_action is not None:
                 sgn = 1 if selected_action == 0 else -1
-                y_arr[:,ind_Rbar_diff] += sgn*lambda_bar*tau_dop*y_arr[:,ind_DA]*(1 - np.exp(-dt/tau_dop))
+                y_arr[:,ind_V_diff] += sgn*lambda_bar*tau_dop*y_arr[:,ind_DA]*(1 - np.exp(-dt/tau_dop))
         y_arr[:,ind_DA] *= np.exp(-dt/tau_dop)
 
         # Artifically set w to [0,1] if they've gone a bit outside it
@@ -418,8 +418,8 @@ def simulate(max_T: float, N: int, r: Union[np.ndarray, List[float], float], Rst
                 y_arr[:,ind_DA] += DA_hist[next_dop_ind]
             
             else: # Value estimation setting
-                # Action probability depends on Rbar_diff
-                p_A1 = scs.expit(y_arr[:,ind_Rbar_diff]*beta).item()
+                # Action probability depends on V_diff
+                p_A1 = scs.expit(y_arr[:,ind_V_diff]*beta).item()
                 action_prob_hist[next_dop_ind] = p_A1
                 selected_action = 0 if np.random.random() < p_A1 else 1
                 action_hist[next_dop_ind] = selected_action # 0 or 1
@@ -448,7 +448,7 @@ def simulate(max_T: float, N: int, r: Union[np.ndarray, List[float], float], Rst
             next_in_inds[next_state] = np.argmax(in_trains_arr[next_state] > cur_t, axis=-1)
 
     if task == 'value estimation':
-        inds = (ind_Apre, ind_Apost, ind_E_pos, ind_E_neg, ind_DA, ind_w, ind_Rbar_diff)
+        inds = (ind_Apre, ind_Apost, ind_E_pos, ind_E_neg, ind_DA, ind_w, ind_V_diff)
     else:
         inds = (ind_Apre, ind_Apost, ind_E_pos, ind_E_neg, ind_DA, ind_w)
     if store_all:
